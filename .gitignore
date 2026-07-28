@@ -4,5 +4,6 @@ __pycache__/
 .env
 .venv/
 env/
+.env.example
 .chroma_db/
 *.pyc
