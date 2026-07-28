@@ -1,0 +1,117 @@
+{
+  "data_version": "2026-07-28",
+  "orders": [
+    {
+      "order_id": "DH1024",
+      "customer_display": "Nguyễn A.",
+      "status": "delivered",
+      "status_label": "Đã giao",
+      "ordered_at": "2026-07-22",
+      "delivered_at": "2026-07-25",
+      "payment_method": "COD",
+      "items": [
+        {
+          "sku": "AO-TS-DEN-S",
+          "product_name": "Áo thun Basic",
+          "variant": "Đen / Size S",
+          "quantity": 1,
+          "unit_price_vnd": 249000,
+          "sale_type": "NORMAL"
+        }
+      ],
+      "after_sales_request": null,
+      "note": "Khách chưa gửi yêu cầu đổi trả."
+    },
+    {
+      "order_id": "DH1025",
+      "customer_display": "Trần B.",
+      "status": "shipping",
+      "status_label": "Đang giao",
+      "ordered_at": "2026-07-27",
+      "delivered_at": null,
+      "payment_method": "Chuyển khoản",
+      "items": [
+        {
+          "sku": "QUAN-KAKI-BE-M",
+          "product_name": "Quần kaki Slim",
+          "variant": "Be / Size M",
+          "quantity": 1,
+          "unit_price_vnd": 399000,
+          "sale_type": "NORMAL"
+        }
+      ],
+      "after_sales_request": null,
+      "note": "Đơn chưa giao thành công."
+    },
+    {
+      "order_id": "DH1026",
+      "customer_display": "Lê C.",
+      "status": "delivered",
+      "status_label": "Đã giao",
+      "ordered_at": "2026-07-07",
+      "delivered_at": "2026-07-10",
+      "payment_method": "Ví điện tử",
+      "items": [
+        {
+          "sku": "AO-SALE-DO-L",
+          "product_name": "Áo polo thanh lý",
+          "variant": "Đỏ / Size L",
+          "quantity": 1,
+          "unit_price_vnd": 159000,
+          "sale_type": "FINAL_SALE"
+        }
+      ],
+      "after_sales_request": null,
+      "note": "Sản phẩm thuộc chương trình thanh lý FINAL_SALE."
+    },
+    {
+      "order_id": "DH1027",
+      "customer_display": "Phạm D.",
+      "status": "cancelled",
+      "status_label": "Đã hủy",
+      "ordered_at": "2026-07-20",
+      "delivered_at": null,
+      "payment_method": "COD",
+      "items": [
+        {
+          "sku": "GIAY-TRANG-38",
+          "product_name": "Giày Sneaker Everyday",
+          "variant": "Trắng / Size 38",
+          "quantity": 1,
+          "unit_price_vnd": 699000,
+          "sale_type": "NORMAL"
+        }
+      ],
+      "after_sales_request": null,
+      "note": "Đơn đã hủy trước khi giao."
+    },
+    {
+      "order_id": "DH1028",
+      "customer_display": "Hoàng E.",
+      "status": "delivered",
+      "status_label": "Đã giao",
+      "ordered_at": "2026-07-23",
+      "delivered_at": "2026-07-26",
+      "payment_method": "Thẻ",
+      "items": [
+        {
+          "sku": "GIAY-TRANG-38",
+          "product_name": "Giày Sneaker Everyday",
+          "variant": "Trắng / Size 38",
+          "quantity": 1,
+          "unit_price_vnd": 699000,
+          "sale_type": "NORMAL"
+        }
+      ],
+      "after_sales_request": {
+        "request_id": "ASR0008",
+        "type": "exchange",
+        "status": "pending_review",
+        "status_label": "Đang chờ duyệt",
+        "requested_at": "2026-07-27",
+        "replacement_sku": "GIAY-TRANG-39"
+      },
+      "note": "Đơn đã có một yêu cầu đổi hàng đang xử lý."
+    }
+  ]
+}

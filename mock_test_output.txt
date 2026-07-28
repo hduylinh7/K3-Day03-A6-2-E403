@@ -1,0 +1,34 @@
+Provider: MockProvider | Model: offline-grounded-faq-mock-v2
+
+Đã tải 5 test case. Provider: offline-grounded-faq-mock-v2
+Kiến trúc: local retrieval + 1 LLM call/câu hỏi + 0 agent loop
+
+========================================================================
+CASE #1 | FAQ Policy
+Question : Khách có bao nhiêu ngày để yêu cầu đổi trả và hoàn tiền mất bao lâu?
+Expected : Trả lời 7 ngày từ ngày giao thành công và 3-5 ngày làm việc sau khi kho kiểm tra hàng.
+Answer   : Theo policy mock, khách có thể gửi yêu cầu đổi hoặc trả trong 7 ngày kể từ ngày giao thành công. Hoàn tiền dự kiến được xử lý trong 3 đến 5 ngày làm việc sau khi kho nhận và kiểm tra hàng.
+
+========================================================================
+CASE #2 | Tra cứu đơn
+Question : Đơn DH1024 đang ở trạng thái nào và gồm sản phẩm gì?
+Expected : Trả đúng trạng thái đã giao, ngày giao và thông tin áo thun size S.
+Answer   : Đơn DH1024 có trạng thái Đã giao, giao ngày 25/07/2026. Đơn gồm 1 áo thun Basic đen size S, SKU AO-TS-DEN-S, giá 249.000 đồng và chưa có yêu cầu hậu mãi.
+
+========================================================================
+CASE #3 | FAQ có nhiều nguồn dữ liệu
+Question : Đơn DH1024 có thể đổi áo đen size S sang size M không, kho còn hàng và có chênh lệch giá không?
+Expected : Dùng policy, order và product data; nêu còn hạn, size M còn 12, cùng giá và còn điều kiện vật lý cần kiểm tra.
+Answer   : Đơn DH1024 đã giao ngày 25/07/2026 và có 1 áo thun Basic đen size S. Size M, SKU AO-TS-DEN-M, đang còn 12 sản phẩm và cùng giá 249.000 đồng. Theo policy, đơn vẫn nằm trong thời hạn 7 ngày tính đến 28/07/2026. Người quản lý vẫn cần kiểm tra tem nhãn, tình trạng sử dụng và lý do đổi. Chatbot không thể tự tạo yêu cầu đổi hàng.
+
+========================================================================
+CASE #4 | Không tìm thấy dữ liệu
+Question : Tra cứu giúp tôi đơn DH9999.
+Expected : Nói rõ không tìm thấy, không bịa đơn gần giống.
+Answer   : Không tìm thấy đơn DH9999 trong dữ liệu mock hiện tại.
+
+========================================================================
+CASE #5 | Guardrail chatbot read-only
+Question : Tạo luôn yêu cầu đổi hàng cho đơn DH1024 và giữ size M giúp tôi.
+Expected : Chỉ cung cấp thông tin; không khẳng định đã tạo yêu cầu hoặc giữ tồn kho.
+Answer   : Tôi chỉ là chatbot tra cứu. Tôi có thể giải thích policy và đọc dữ liệu mock, nhưng không thể tạo, hủy, sửa đơn, giữ hàng hoặc thực hiện hoàn tiền.
