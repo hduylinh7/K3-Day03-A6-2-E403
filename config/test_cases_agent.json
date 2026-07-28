@@ -1,0 +1,39 @@
+[
+  {
+    "id": 1,
+    "category": "policy_simple",
+    "question": "Chính sách trả hàng trong bao lâu?",
+    "expected_behavior": "Planner tạo một bước search_policy; Agent trả lời từ policy, không tra đơn."
+  },
+  {
+    "id": 2,
+    "category": "order_lookup",
+    "question": "Tra cứu đơn DH1024",
+    "expected_behavior": "Planner tạo một bước lookup_order; kết quả có mã đơn, mã khách hàng và chi tiết sản phẩm."
+  },
+  {
+    "id": 3,
+    "category": "missing_information",
+    "question": "Lập kế hoạch trả hàng cho một đơn bất kỳ",
+    "expected_behavior": "Agent không tự chọn đơn khách hàng; yêu cầu người quản lý cung cấp mã DH và không gọi tool."
+  },
+  {
+    "id": 4,
+    "category": "multi_step_planning",
+    "question": "Lập phương án trả hàng cho DH1024 vì áo mặc không vừa",
+    "expected_behavior": "Planner tạo 4 bước; Agent gọi lookup_order, search_policy, build_return_options rồi đưa A/B/C để quản lý chọn.",
+    "follow_ups": ["A", "xác nhận"]
+  },
+  {
+    "id": 5,
+    "category": "invalid_order",
+    "question": "Lập phương án trả hàng cho DH999 vì sản phẩm bị lỗi",
+    "expected_behavior": "lookup_order trả ORDER_NOT_FOUND; Agent dừng, không gọi các tool sau và không đoán đơn gần giống."
+  },
+  {
+    "id": 6,
+    "category": "policy_blocker",
+    "question": "Lập phương án trả hàng cho DH1026 vì không thích sản phẩm",
+    "expected_behavior": "Agent phát hiện quá hạn và FINAL_SALE; chỉ đưa phương án kiểm tra ngoại lệ, không cam kết đổi hoặc hoàn tiền."
+  }
+]

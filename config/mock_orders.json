@@ -20,7 +20,8 @@
         }
       ],
       "after_sales_request": null,
-      "note": "Khách chưa gửi yêu cầu đổi trả."
+      "note": "Khách chưa gửi yêu cầu đổi trả.",
+      "customer_id": "KH0001"
     },
     {
       "order_id": "DH1025",
@@ -41,7 +42,8 @@
         }
       ],
       "after_sales_request": null,
-      "note": "Đơn chưa giao thành công."
+      "note": "Đơn chưa giao thành công.",
+      "customer_id": "KH0002"
     },
     {
       "order_id": "DH1026",
@@ -62,7 +64,8 @@
         }
       ],
       "after_sales_request": null,
-      "note": "Sản phẩm thuộc chương trình thanh lý FINAL_SALE."
+      "note": "Sản phẩm thuộc chương trình thanh lý FINAL_SALE.",
+      "customer_id": "KH0003"
     },
     {
       "order_id": "DH1027",
@@ -83,7 +86,8 @@
         }
       ],
       "after_sales_request": null,
-      "note": "Đơn đã hủy trước khi giao."
+      "note": "Đơn đã hủy trước khi giao.",
+      "customer_id": "KH0004"
     },
     {
       "order_id": "DH1028",
@@ -111,7 +115,8 @@
         "requested_at": "2026-07-27",
         "replacement_sku": "GIAY-TRANG-39"
       },
-      "note": "Đơn đã có một yêu cầu đổi hàng đang xử lý."
+      "note": "Đơn đã có một yêu cầu đổi hàng đang xử lý.",
+      "customer_id": "KH0005"
     }
   ]
 }
