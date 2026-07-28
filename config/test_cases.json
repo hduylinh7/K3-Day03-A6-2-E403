@@ -28,5 +28,17 @@
     "category": "Hybrid multi-source RAG",
     "question": "Đơn DH1024 có đổi áo sang size M được không?",
     "expected_behavior": "Kết hợp exact order, product size M và semantic policy; không tạo yêu cầu đổi hàng."
+  },
+  {
+    "id": 6,
+    "category": "Semantic FAQ",
+    "question": "Làm thế nào để tôi liên hệ trực tiếp với bộ phận hỗ trợ?",
+    "expected_behavior": "Chroma tìm đúng phần thông tin liên hệ; chatbot trả về hotline hoặc email hỗ trợ."
+  },
+  {
+    "id": 7,
+    "category": "Exact inventory overlay",
+    "question": "Size L còn bao nhiêu sản phẩm trong kho?",
+    "expected_behavior": "Lấy tất cả sản phẩm có metadata size L; trả về tổng số lượng và chi tiết từng loại sản phẩm size L còn lại."
   }
 ]
