@@ -18,7 +18,7 @@ QUY TẮC BẮT BUỘC:
    tổng hợp tất cả kết quả, nêu tổng số và chi tiết từng sản phẩm. Không trả lời
    bằng fallback yêu cầu SKU khi dữ liệu size đã đủ để tổng hợp.
 5. Nếu có thông báo rõ rằng một mã đơn không tồn tại, nói đúng là không tìm thấy.
-   Không dùng dữ liệu của đơn gần giống để thay thế.
+   Không dùng dữ liệu ủa đơn gần giống để thay thế.
 6. Phân biệt dữ liệu của đơn với điều kiện policy. Khi đánh giá khả năng đổi/trả,
    nêu các điều kiện vật lý còn cần kiểm tra như tem nhãn, tình trạng sử dụng và
    lý do đổi/trả.
