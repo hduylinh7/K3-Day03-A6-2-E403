@@ -9,10 +9,8 @@ import json
 from datetime import date
 from typing import Any
 
-
 POLICY_DATE = date(2026, 7, 28)
 RETURN_WINDOW_DAYS = 7
-
 ORDERS: dict[str, dict[str, Any]] = {
     "DH1024": {
         "order_id": "DH1024",
@@ -66,14 +64,12 @@ ORDERS: dict[str, dict[str, Any]] = {
         ],
     },
 }
-
 INVENTORY: dict[str, int] = {
     "AO-DEN-S": 3,
     "AO-DEN-M": 8,
     "AO-DEN-L": 0,
     "AO-TRANG-M": 5,
 }
-
 PRODUCT_PRICES: dict[str, int] = {
     "AO-DEN-S": 199000,
     "AO-DEN-M": 199000,
@@ -82,8 +78,6 @@ PRODUCT_PRICES: dict[str, int] = {
 }
 
 AFTER_SALES_REQUESTS: dict[str, dict[str, Any]] = {}
-
-
 def _result(
     tool: str,
     success: bool,
@@ -110,7 +104,6 @@ def _find_item(order: dict[str, Any], sku: str) -> dict[str, Any] | None:
         (item for item in order["items"] if item["sku"] == normalized_sku),
         None,
     )
-
 
 def lookup_order(order_id: str) -> str:
     """
@@ -163,7 +156,6 @@ def check_return_eligibility(order_id: str, sku: str, reason: str) -> str:
     normalized_id = _normalize_text(order_id).upper()
     normalized_sku = _normalize_text(sku).upper()
     normalized_reason = _normalize_text(reason)
-
     if not normalized_id or not normalized_sku or not normalized_reason:
         return _result(
             "check_return_eligibility",
