@@ -1,97 +1,5 @@
-# 📊 BÁO CÁO GIÁM SÁT & ĐÁNH GIÁ (OBSERVABILITY TRACE LOGS)
 
-*Dành cho Role 5: Observability & Reviewer*
-
----
-
-## 📍 MỐC 1 — ĐỊNH HÌNH BÀI TOÁN & AGENTIC FIT
-
-### 1. Chủ đề đã chọn
-
-**Trợ lý tra cứu đơn hàng và xử lý đổi trả cho người quản lý bán hàng/kho của doanh nghiệp nhỏ.**
-
-### 2. Người dùng mục tiêu
-
-- Chủ cửa hàng, quản lý bán hàng hoặc quản lý kho.
-- Cần tra cứu nhanh trạng thái đơn, sản phẩm trong đơn và tồn kho.
-- Cần kiểm tra điều kiện đổi/trả, chênh lệch hàng thay thế và tạo yêu cầu xử lý.
-- Không yêu cầu người quản lý phải nhớ toàn bộ chính sách hoặc mở nhiều màn hình cùng lúc.
-
-### 3. Phạm vi MVP của bài Lab
-
-Agent phiên bản đầu chỉ xử lý dữ liệu mô phỏng, gồm:
-
-1. Tra cứu đơn hàng theo mã đơn.
-2. Kiểm tra đơn/sản phẩm có đủ điều kiện đổi hoặc trả hay không.
-3. Kiểm tra tồn kho của sản phẩm muốn đổi.
-4. Tính chênh lệch giá dự kiến khi đổi sản phẩm.
-5. Tạo yêu cầu đổi/trả sau khi người dùng xác nhận rõ ràng.
-6. Tra cứu trạng thái yêu cầu đổi/trả đã tạo.
-
-**Ngoài phạm vi MVP:**
-
-- Không tự động hoàn tiền thật.
-- Không tự gọi đơn vị vận chuyển.
-- Không sửa hoặc xóa đơn gốc.
-- Không tạo yêu cầu đổi/trả khi chưa có xác nhận cuối cùng.
-- Không xử lý dữ liệu khách hàng thật hoặc thông tin thanh toán thật.
-
-### 4. Luồng nghiệp vụ đại diện
-
-**Tình huống:**  
-“Kiểm tra đơn `DH1024`. Khách muốn đổi áo đen size S sang size M vì mặc chật. Kho còn hàng không và đơn này có được đổi không?”
-
-Luồng dự kiến:
-
-```text
-Tra cứu đơn hàng
-→ Xác định đúng sản phẩm và trạng thái giao hàng
-→ Kiểm tra điều kiện đổi trả
-→ Kiểm tra tồn kho biến thể mới
-→ Tính chênh lệch dự kiến nếu có
-→ Tóm tắt phương án
-→ Xin xác nhận
-→ Tạo yêu cầu đổi hàng
-```
-
-Đây không phải một câu hỏi đáp cố định. Kết quả ở mỗi bước quyết định bước tiếp theo:
-
-- Không tìm thấy đơn → dừng và yêu cầu kiểm tra lại mã đơn.
-- Đơn chưa giao → không mở quy trình đổi/trả sau giao hàng.
-- Hết thời hạn đổi trả → từ chối an toàn và nêu lý do.
-- Sản phẩm mới hết kho → đề xuất trả hàng hoặc chọn biến thể khác.
-- Có hàng và đủ điều kiện → xin xác nhận trước khi tạo yêu cầu.
-
----
-
-## 🎯 5. BẢNG CHẤM ĐIỂM AGENTIC FIT (SCORING MATRIX)
-
-| Tiêu chí | Điểm (1–5) | Lý do đánh giá |
-| :--- | :---: | :--- |
-| 🧠 **Multi-step Reasoning** | `5/5` | Một yêu cầu đổi hàng thường phải tra cứu đơn, xác định sản phẩm, kiểm tra chính sách, tồn kho, chênh lệch và bước xác nhận. |
-| 🛠️ **Tool Interaction** | `5/5` | Cần đọc dữ liệu đơn hàng, tồn kho và ghi yêu cầu đổi/trả qua nhiều tool khác nhau; LLM không thể tự bịa các dữ liệu này. |
-| 🔀 **Dynamic Decision** | `5/5` | Trạng thái đơn, lý do đổi trả, thời hạn chính sách và tồn kho làm thay đổi hoàn toàn đường xử lý. |
-| ⏳ **Long Horizon** | `3/5` | Quy trình có khoảng 3–6 bước nhưng thường hoàn tất trong một phiên làm việc ngắn, chưa cần lập kế hoạch dài hạn. |
-| **TỔNG ĐIỂM FIT** | **18/20** | **KẾT LUẬN: BÀI TOÁN RẤT PHÙ HỢP VỚI REACT AGENT.** |
-
-### Kết luận Agentic Fit
-
-ReAct Agent đáng dùng khi câu hỏi cần **dữ liệu nghiệp vụ thực tế**, **nhiều bước phụ thuộc nhau** hoặc **thay đổi trạng thái hệ thống**.
-
-Tuy nhiên, không phải mọi câu hỏi đều cần Agent:
-
-| Loại yêu cầu | Luồng phù hợp |
-| :--- | :--- |
-| “Cửa hàng cho đổi hàng trong bao lâu?” | Chatbot/FAQ path |
-| “Đơn DH1024 hiện ở trạng thái nào?” | Agent gọi `lookup_order` |
-| “Đơn DH1024 có đổi sang size M được không?” | ReAct Agent nhiều bước |
-| “Tạo yêu cầu đổi sang size M giúp tôi.” | ReAct Agent + xác nhận trước hành động |
-
-Điểm quan trọng: **Không nên dùng Agent cho mọi câu hỏi**. Với câu hỏi lý thuyết đơn giản, chatbot nhanh hơn, rẻ hơn và ít rủi ro hơn.
-
----
-
-## 🧰 6. DANH SÁCH TOOL DỰ KIẾN CHO `src/tools.py`
+## DANH SÁCH TOOL DỰ KIẾN CHO `src/tools.py`
 
 | Tool | Mục đích | Loại tác động |
 | :--- | :--- | :---: |
@@ -125,7 +33,7 @@ lookup_order
 
 ---
 
-## ⚠️ 7. FAILURE MODES DỰ KIẾN
+## FAILURE MODES DỰ KIẾN
 
 | Failure mode | Biểu hiện | Cách xử lý an toàn dự kiến |
 | :--- | :--- | :--- |
@@ -147,7 +55,7 @@ lookup_order
 
 ---
 
-## 🛡️ 8. NGUYÊN TẮC AN TOÀN CHỐT TỪ MỐC 1
+## NGUYÊN TẮC AN TOÀN CHỐT TỪ MỐC 1
 
 1. Chỉ kết luận trạng thái đơn, tồn kho và điều kiện đổi/trả khi đã có Observation từ tool.
 2. Không tự bịa mã đơn, SKU, chính sách, số lượng tồn hoặc trạng thái xử lý.
@@ -160,25 +68,3 @@ lookup_order
 
 ---
 
-## ✅ 9. CHECKLIST HOÀN THÀNH MỐC 1
-
-- [x] Đã chọn chủ đề thực tế.
-- [x] Đã mô tả người dùng và phạm vi MVP.
-- [x] Đã chứng minh bài toán có nhu cầu dùng Agent.
-- [x] Đã hoàn thành Scoring Matrix: **18/20**.
-- [x] Đã liệt kê các tool dự kiến.
-- [x] Đã xác định các failure modes chính.
-- [x] Đã thống nhất guardrail cho hành động tạo yêu cầu.
-- [x] Môi trường dự án đã được người dùng xác nhận setup xong.
-- [ ] Chưa xác minh trực tiếp lệnh `python src/app.py` vì mã nguồn `src/app.py` không nằm trong các file được cung cấp ở lượt này.
-- [ ] Chưa thực hiện Mốc 2.
-
----
-
-## 🔄 10. LỆNH GIT SAU KHI CHÉP FILE VÀO DỰ ÁN
-
-```bash
-git add .
-git commit -m "Moc 1: Agentic Fit cho tro ly don hang va doi tra"
-git push
-```
