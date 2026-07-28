@@ -1,538 +1,634 @@
-"""
-🛠️ TOOL REGISTRY & SCHEMAS (Dành cho Role 2: Tool & Spec Engineer)
-Các Tool deterministic cho đề tài tra cứu đơn hàng và xử lý đổi trả.
+"""Small, explicit tool set for the order return AI agent.
+
+Main read tools:
+1. lookup_order
+2. search_policy
+3. build_return_options
+
+Optional write tool:
+4. create_return_request
+
+The LLM never mutates business data directly. Every tool validates its inputs
+and returns one JSON-serializable observation.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import date
-from typing import Any
+import os
+from dataclasses import dataclass
+from datetime import date, datetime
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any, Callable
 
+from knowledge_base import ChromaKnowledgeBase, get_knowledge_base
 
-POLICY_DATE = date(2026, 7, 28)
-RETURN_WINDOW_DAYS = 7
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
+CONFIG_DIR = PROJECT_ROOT / "config"
+ORDERS_PATH = CONFIG_DIR / "mock_orders.json"
+REQUESTS_PATH = CONFIG_DIR / "mock_after_sales_requests.json"
+POLICY_RULES_PATH = CONFIG_DIR / "policy_rules.json"
 
-ORDERS: dict[str, dict[str, Any]] = {
-    "DH1024": {
-        "order_id": "DH1024",
-        "customer": "Nguyễn A.",
-        "status": "delivered",
-        "ordered_at": "2026-07-21",
-        "delivered_at": "2026-07-24",
-        "items": [
-            {
-                "sku": "AO-DEN-S",
-                "product_name": "Áo thun Basic",
-                "variant": "Đen / S",
-                "quantity": 1,
-                "unit_price": 199000,
-                "returnable": True,
-            }
-        ],
-    },
-    "DH1025": {
-        "order_id": "DH1025",
-        "customer": "Trần B.",
-        "status": "processing",
-        "ordered_at": "2026-07-27",
-        "delivered_at": None,
-        "items": [
-            {
-                "sku": "AO-TRANG-M",
-                "product_name": "Áo thun Basic",
-                "variant": "Trắng / M",
-                "quantity": 1,
-                "unit_price": 199000,
-                "returnable": True,
-            }
-        ],
-    },
-    "DH1001": {
-        "order_id": "DH1001",
-        "customer": "Lê C.",
-        "status": "delivered",
-        "ordered_at": "2026-06-18",
-        "delivered_at": "2026-06-22",
-        "items": [
-            {
-                "sku": "AO-DEN-M",
-                "product_name": "Áo thun Basic",
-                "variant": "Đen / M",
-                "quantity": 1,
-                "unit_price": 199000,
-                "returnable": True,
-            }
-        ],
-    },
+ACTIVE_REQUEST_STATUSES = {
+    "pending_review",
+    "approved",
+    "awaiting_return",
+    "received_by_warehouse",
+    "processing",
 }
 
-INVENTORY: dict[str, int] = {
-    "AO-DEN-S": 3,
-    "AO-DEN-M": 8,
-    "AO-DEN-L": 0,
-    "AO-TRANG-M": 5,
-}
 
-PRODUCT_PRICES: dict[str, int] = {
-    "AO-DEN-S": 199000,
-    "AO-DEN-M": 199000,
-    "AO-DEN-L": 219000,
-    "AO-TRANG-M": 199000,
-}
+@dataclass(frozen=True)
+class ToolSpec:
+    name: str
+    description: str
+    parameters: dict[str, Any]
+    handler: Callable[..., dict[str, Any]]
+    side_effect: str = "read_only"
+    requires_confirmation: bool = False
 
-AFTER_SALES_REQUESTS: dict[str, dict[str, Any]] = {}
-
-
-def _result(
-    tool: str,
-    success: bool,
-    *,
-    data: dict[str, Any] | None = None,
-    error: str | None = None,
-) -> str:
-    """Chuẩn hóa mọi kết quả Tool thành JSON string, không quăng lỗi ra Agent."""
-    payload: dict[str, Any] = {"tool": tool, "success": success}
-    if data is not None:
-        payload["data"] = data
-    if error is not None:
-        payload["error"] = error
-    return json.dumps(payload, ensure_ascii=False)
+    def declaration(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+            "side_effect": self.side_effect,
+            "requires_confirmation": self.requires_confirmation,
+        }
 
 
-def _normalize_text(value: Any) -> str:
-    return str(value).strip() if value is not None else ""
+class ToolRegistry:
+    """Validate and execute registered tools only."""
+
+    def __init__(self, specs: list[ToolSpec]):
+        self._specs = {spec.name: spec for spec in specs}
+
+    @property
+    def names(self) -> list[str]:
+        return sorted(self._specs)
+
+    def get(self, name: str) -> ToolSpec | None:
+        return self._specs.get(name)
+
+    def declarations(self) -> list[dict[str, Any]]:
+        return [self._specs[name].declaration() for name in self.names]
+
+    def catalog_text(self) -> str:
+        return json.dumps(self.declarations(), ensure_ascii=False, indent=2)
+
+    def execute(self, name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+        spec = self.get(name)
+        if spec is None:
+            return _error("UNKNOWN_TOOL", f"Tool '{name}' không tồn tại.", valid_tools=self.names)
+        if not isinstance(arguments, dict):
+            return _error("INVALID_ARGUMENTS", "Tool arguments phải là JSON object.")
+        validation_error = _validate_arguments(spec.parameters, arguments)
+        if validation_error:
+            return _error("INVALID_ARGUMENTS", validation_error)
+        if spec.requires_confirmation and arguments.get("confirmed") is not True:
+            return _error(
+                "CONFIRMATION_REQUIRED",
+                "Hành động ghi dữ liệu cần xác nhận rõ ràng ở một lượt riêng.",
+            )
+        try:
+            result = spec.handler(**arguments)
+        except TypeError as exc:
+            return _error("INVALID_ARGUMENTS", f"Không gọi được tool: {exc}")
+        except Exception as exc:  # pragma: no cover
+            return _error("TOOL_EXCEPTION", f"Tool gặp lỗi ngoài dự kiến: {exc}")
+        if not isinstance(result, dict):
+            return _error("INVALID_TOOL_RESULT", "Tool phải trả JSON object.")
+        return result
 
 
-def _find_item(order: dict[str, Any], sku: str) -> dict[str, Any] | None:
-    normalized_sku = _normalize_text(sku).upper()
+def _ok(**payload: Any) -> dict[str, Any]:
+    return {"ok": True, **payload}
+
+
+def _error(code: str, message: str, **payload: Any) -> dict[str, Any]:
+    return {"ok": False, "error_code": code, "message": message, **payload}
+
+
+def _load_json(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not path.exists():
+        if default is not None:
+            return default
+        raise FileNotFoundError(f"Không tìm thấy file {path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path.name} phải chứa JSON object.")
+    return data
+
+
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp"
+    ) as temp:
+        json.dump(data, temp, ensure_ascii=False, indent=2)
+        temp.write("\n")
+        temporary_path = Path(temp.name)
+    temporary_path.replace(path)
+
+
+def _orders() -> list[dict[str, Any]]:
+    rows = _load_json(ORDERS_PATH).get("orders", [])
+    if not isinstance(rows, list):
+        raise ValueError("mock_orders.json: orders phải là danh sách.")
+    return rows
+
+
+
+
+def _policy_rules() -> dict[str, Any]:
+    return _load_json(
+        POLICY_RULES_PATH,
+        default={
+            "return_window_days": 7,
+            "excluded_sale_types": ["FINAL_SALE"],
+            "manual_checks": [
+                "Sản phẩm còn nguyên tem, nhãn và bao bì.",
+                "Sản phẩm chưa qua sử dụng.",
+            ],
+            "personal_change_warning": "Lý do đổi ý cá nhân có thể bị từ chối theo policy.",
+            "missing_reason_warning": "Chưa có lý do trả hàng rõ ràng.",
+        },
+    )
+
+def _requests_data() -> dict[str, Any]:
+    data = _load_json(
+        REQUESTS_PATH,
+        default={"data_version": "2026-07-28", "requests": []},
+    )
+    if not isinstance(data.get("requests", []), list):
+        raise ValueError("mock_after_sales_requests.json: requests phải là danh sách.")
+    return data
+
+
+def _find_order(order_id: str) -> dict[str, Any] | None:
+    target = order_id.strip().upper()
     return next(
-        (item for item in order["items"] if item["sku"] == normalized_sku),
+        (row for row in _orders() if str(row.get("order_id", "")).upper() == target),
         None,
     )
 
 
-def lookup_order(order_id: str) -> str:
-    """
-    Tra cứu một đơn hàng bằng mã đơn.
+def _active_requests(order: dict[str, Any]) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    embedded = order.get("after_sales_request")
+    if isinstance(embedded, dict) and embedded.get("status") in ACTIVE_REQUEST_STATUSES:
+        results.append(embedded)
+    target = str(order.get("order_id", "")).upper()
+    for request in _requests_data().get("requests", []):
+        if (
+            str(request.get("order_id", "")).upper() == target
+            and request.get("status") in ACTIVE_REQUEST_STATUSES
+        ):
+            results.append(request)
+    return results
 
-    Purpose:
-        Dùng khi cần biết trạng thái, ngày giao và các sản phẩm trong đơn.
-    Input:
-        order_id: Mã đơn bắt buộc, ví dụ ``DH1024``.
-    Output:
-        JSON string chứa ``success`` và dữ liệu đơn đã tối thiểu hóa PII.
-    Error semantics:
-        Trả JSON ``success=false`` khi thiếu hoặc không tìm thấy mã đơn.
-    Side effect:
-        Read-only, không thay đổi dữ liệu.
-    """
-    normalized_id = _normalize_text(order_id).upper()
-    if not normalized_id:
-        return _result("lookup_order", False, error="Thiếu mã đơn hàng.")
 
-    order = ORDERS.get(normalized_id)
+def _validate_arguments(schema: dict[str, Any], arguments: dict[str, Any]) -> str | None:
+    required = schema.get("required", [])
+    for field in required:
+        if field not in arguments or arguments[field] in (None, ""):
+            return f"Thiếu trường bắt buộc '{field}'."
+
+    properties = schema.get("properties", {})
+    if schema.get("additionalProperties") is False:
+        unknown = sorted(set(arguments) - set(properties))
+        if unknown:
+            return f"Trường không được hỗ trợ: {unknown}."
+
+    python_types: dict[str, Any] = {
+        "string": str,
+        "integer": int,
+        "boolean": bool,
+        "object": dict,
+        "array": list,
+    }
+    for field, value in arguments.items():
+        rule = properties.get(field, {})
+        expected = rule.get("type")
+        if expected in python_types and not isinstance(value, python_types[expected]):
+            return f"'{field}' phải có kiểu {expected}."
+        if "enum" in rule and value not in rule["enum"]:
+            return f"'{field}' phải thuộc {rule['enum']}."
+        if isinstance(value, int):
+            if "minimum" in rule and value < rule["minimum"]:
+                return f"'{field}' phải >= {rule['minimum']}."
+            if "maximum" in rule and value > rule["maximum"]:
+                return f"'{field}' phải <= {rule['maximum']}."
+    return None
+
+
+# ---------------------------------------------------------------------------
+# TOOL 1: ORDER LOOKUP
+# ---------------------------------------------------------------------------
+
+def lookup_order(order_id: str) -> dict[str, Any]:
+    """Return one exact order and never guess a similar order ID."""
+    target = order_id.strip().upper()
+    order = _find_order(target)
     if order is None:
-        return _result(
-            "lookup_order",
-            False,
-            error=f"Không tìm thấy đơn hàng '{normalized_id}'.",
+        return _error("ORDER_NOT_FOUND", f"Không tìm thấy đơn {target}.", order_id=target)
+
+    items = order.get("items", []) if isinstance(order.get("items"), list) else []
+    total_vnd = sum(
+        int(item.get("quantity", 0)) * int(item.get("unit_price_vnd", 0))
+        for item in items
+    )
+    return _ok(
+        order={
+            "order_id": target,
+            "customer_id": order.get("customer_id"),
+            "customer_display": order.get("customer_display"),
+            "status": order.get("status"),
+            "status_label": order.get("status_label"),
+            "ordered_at": order.get("ordered_at"),
+            "delivered_at": order.get("delivered_at"),
+            "payment_method": order.get("payment_method"),
+            "items": items,
+            "total_vnd": total_vnd,
+            "active_return_requests": _active_requests(order),
+            "note": order.get("note", ""),
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# TOOL 2: POLICY SEARCH
+# ---------------------------------------------------------------------------
+
+def search_policy(
+    query: str,
+    top_k: int = 5,
+    *,
+    knowledge_base: ChromaKnowledgeBase | None = None,
+) -> dict[str, Any]:
+    """Search only policy/FAQ chunks in Chroma."""
+    kb = knowledge_base or get_knowledge_base()
+    # Prefixing the query activates the policy-only retrieval guard in the KB.
+    chunks, notes = kb.retrieve(f"chính sách đổi trả: {query}", history=None, top_k=max(top_k, 8))
+    policy_chunks = [chunk for chunk in chunks if chunk.metadata.get("source") == "policy"]
+    results = [
+        {
+            "id": chunk.doc_id,
+            "title": chunk.metadata.get("title") or chunk.doc_id,
+            "text": chunk.text,
+            "distance": chunk.distance,
+        }
+        for chunk in policy_chunks[:top_k]
+    ]
+    if not results:
+        return _error(
+            "POLICY_NOT_FOUND",
+            "Không tìm thấy điều khoản policy phù hợp.",
+            query=query,
+            notes=notes,
         )
+    return _ok(query=query, notes=notes, result_count=len(results), results=results)
 
-    return _result("lookup_order", True, data=order)
+
+# ---------------------------------------------------------------------------
+# TOOL 3: BUILD BUSINESS OPTIONS
+# ---------------------------------------------------------------------------
+
+def _days_since_delivery(order: dict[str, Any]) -> int | None:
+    delivered_at = order.get("delivered_at")
+    if not delivered_at:
+        return None
+    current = date.fromisoformat(os.getenv("MOCK_REFERENCE_DATE", "2026-07-28"))
+    delivered = date.fromisoformat(str(delivered_at))
+    return (current - delivered).days
 
 
-def check_return_eligibility(order_id: str, sku: str, reason: str) -> str:
-    """
-    Kiểm tra một sản phẩm có đủ điều kiện đổi/trả hay không.
+def _reason_category(reason: str) -> str:
+    folded = reason.casefold()
+    if any(token in folded for token in ("lỗi", "loi", "hỏng", "hong", "giao sai", "thiếu", "thieu", "không đúng mô tả", "khong dung mo ta")):
+        return "product_issue"
+    if any(token in folded for token in ("không vừa", "khong vua", "chật", "chat", "rộng", "rong", "size", "cỡ")):
+        return "fit_issue"
+    if any(token in folded for token in ("không thích", "khong thich", "không ưng", "khong ung", "đổi ý", "doi y")):
+        return "change_of_mind"
+    return "unspecified"
 
-    Purpose:
-        Dùng sau khi đã có mã đơn, SKU và lý do đổi/trả.
-    Input:
-        order_id: Mã đơn.
-        sku: SKU thuộc đơn hàng.
-        reason: Lý do khách yêu cầu đổi/trả.
-    Output:
-        JSON string gồm ``eligible``, hạn cuối và lý do kết luận.
-    Error semantics:
-        Không crash khi đơn/SKU sai; trả ``success=false`` hoặc
-        ``eligible=false`` kèm lý do.
-    Side effect:
-        Read-only.
-    """
-    normalized_id = _normalize_text(order_id).upper()
-    normalized_sku = _normalize_text(sku).upper()
-    normalized_reason = _normalize_text(reason)
 
-    if not normalized_id or not normalized_sku or not normalized_reason:
-        return _result(
-            "check_return_eligibility",
-            False,
-            error="Cần đủ order_id, sku và reason.",
-        )
-
-    order = ORDERS.get(normalized_id)
+def build_return_options(order_id: str, reason: str) -> dict[str, Any]:
+    """Build manager-facing return options from hard business rules."""
+    target = order_id.strip().upper()
+    order = _find_order(target)
     if order is None:
-        return _result(
-            "check_return_eligibility",
-            False,
-            error=f"Không tìm thấy đơn hàng '{normalized_id}'.",
+        return _error("ORDER_NOT_FOUND", f"Không tìm thấy đơn {target}.")
+
+    rules = _policy_rules()
+    return_window_days = int(rules.get("return_window_days", 7))
+    excluded_sale_types = {
+        str(value).upper() for value in rules.get("excluded_sale_types", ["FINAL_SALE"])
+    }
+    blockers: list[str] = []
+    warnings: list[str] = []
+    days = _days_since_delivery(order)
+    items = order.get("items", []) if isinstance(order.get("items"), list) else []
+
+    if order.get("status") != "delivered":
+        blockers.append(f"Đơn đang ở trạng thái {order.get('status_label')}, chưa thể mở quy trình trả hàng sau giao.")
+    if days is None and order.get("status") == "delivered":
+        blockers.append("Đơn đã giao nhưng thiếu ngày giao để tính thời hạn.")
+    elif days is not None and days > return_window_days:
+        blockers.append(
+            f"Đơn đã quá thời hạn {return_window_days} ngày: hiện là {days} ngày từ lúc giao."
         )
-
-    item = _find_item(order, normalized_sku)
-    if item is None:
-        return _result(
-            "check_return_eligibility",
-            False,
-            error=f"SKU '{normalized_sku}' không thuộc đơn {normalized_id}.",
+    elif days is not None and days < 0:
+        blockers.append("Ngày tham chiếu sớm hơn ngày giao hàng.")
+    excluded_in_order = sorted({
+        str(item.get("sale_type", "")).upper()
+        for item in items
+        if str(item.get("sale_type", "")).upper() in excluded_sale_types
+    })
+    if excluded_in_order:
+        blockers.append(
+            "Đơn có sản phẩm thuộc nhóm loại trừ " + ", ".join(excluded_in_order)
+            + ", không thuộc diện đổi/trả thông thường."
         )
+    if _active_requests(order):
+        blockers.append("Đơn đã có yêu cầu hậu mãi đang hoạt động.")
 
-    if order["status"] != "delivered" or not order["delivered_at"]:
-        return _result(
-            "check_return_eligibility",
-            True,
-            data={
-                "eligible": False,
-                "reason": "Đơn hàng chưa ở trạng thái đã giao.",
-            },
+    category = _reason_category(reason)
+    if category == "unspecified":
+        warnings.append(str(rules.get("missing_reason_warning")))
+    elif category == "change_of_mind":
+        warnings.append(str(rules.get("personal_change_warning")))
+
+    manual_checks = [str(value) for value in rules.get("manual_checks", [])]
+
+    options: list[dict[str, Any]] = []
+    if not blockers:
+        if category == "product_issue":
+            options.extend(
+                [
+                    {
+                        "option_id": "A",
+                        "code": "RETURN_REFUND",
+                        "title": "Trả hàng và xem xét hoàn tiền",
+                        "request_type": "return",
+                        "description": "Kho kiểm tra lỗi thực tế trước khi duyệt hoàn tiền.",
+                        "recommended": True,
+                    },
+                    {
+                        "option_id": "B",
+                        "code": "EXCHANGE_PRODUCT",
+                        "title": "Đổi sản phẩm tương đương",
+                        "request_type": "exchange",
+                        "description": "Phù hợp khi quản lý muốn ưu tiên đổi thay vì hoàn tiền; tồn kho cần kiểm tra ở bước xử lý sau.",
+                        "recommended": False,
+                    },
+                ]
+            )
+        elif category == "fit_issue":
+            options.extend(
+                [
+                    {
+                        "option_id": "A",
+                        "code": "EXCHANGE_SIZE",
+                        "title": "Đổi size hoặc biến thể",
+                        "request_type": "exchange",
+                        "description": "Phù hợp nhất với lý do mặc không vừa; tồn kho size thay thế cần được nhân viên xác minh.",
+                        "recommended": True,
+                    },
+                    {
+                        "option_id": "B",
+                        "code": "RETURN_REVIEW",
+                        "title": "Gửi yêu cầu trả hàng để duyệt",
+                        "request_type": "return",
+                        "description": "Không bảo đảm hoàn tiền vì lý do không vừa không phải lỗi sản phẩm.",
+                        "recommended": False,
+                    },
+                ]
+            )
+        else:
+            options.extend(
+                [
+                    {
+                        "option_id": "A",
+                        "code": "RETURN_REVIEW",
+                        "title": "Gửi yêu cầu trả hàng để duyệt",
+                        "request_type": "return",
+                        "description": "Kho và nhân viên hậu mãi sẽ kiểm tra lý do cùng tình trạng sản phẩm.",
+                        "recommended": category != "change_of_mind",
+                    },
+                    {
+                        "option_id": "B",
+                        "code": "EXCHANGE_PRODUCT",
+                        "title": "Chuyển sang phương án đổi hàng",
+                        "request_type": "exchange",
+                        "description": "Áp dụng nếu quản lý và khách thống nhất đổi sang sản phẩm khác.",
+                        "recommended": category == "change_of_mind",
+                    },
+                ]
+            )
+        options.append(
+            {
+                "option_id": "C",
+                "code": "MANUAL_REVIEW",
+                "title": "Chuyển nhân viên kiểm tra thủ công",
+                "request_type": "manual_review",
+                "description": "Không tự động kết luận; nhân viên rà soát ảnh, tình trạng hàng và trao đổi với khách.",
+                "recommended": False,
+            }
         )
-
-    if not item.get("returnable", False):
-        return _result(
-            "check_return_eligibility",
-            True,
-            data={
-                "eligible": False,
-                "reason": "Sản phẩm thuộc nhóm không hỗ trợ đổi/trả.",
-            },
-        )
-
-    delivered_at = date.fromisoformat(order["delivered_at"])
-    days_since_delivery = (POLICY_DATE - delivered_at).days
-    deadline = delivered_at.fromordinal(
-        delivered_at.toordinal() + RETURN_WINDOW_DAYS
-    )
-
-    has_active_request = any(
-        request["order_id"] == normalized_id
-        and request["original_sku"] == normalized_sku
-        and request["status"] in {"created", "processing"}
-        for request in AFTER_SALES_REQUESTS.values()
-    )
-    if has_active_request:
-        return _result(
-            "check_return_eligibility",
-            True,
-            data={
-                "eligible": False,
-                "reason": "Sản phẩm đã có yêu cầu hậu mãi đang xử lý.",
-            },
-        )
-
-    eligible = 0 <= days_since_delivery <= RETURN_WINDOW_DAYS
-    return _result(
-        "check_return_eligibility",
-        True,
-        data={
-            "eligible": eligible,
-            "policy_date": POLICY_DATE.isoformat(),
-            "delivered_at": delivered_at.isoformat(),
-            "deadline": deadline.isoformat(),
-            "days_since_delivery": days_since_delivery,
-            "submitted_reason": normalized_reason,
-            "reason": (
-                "Đơn còn trong thời hạn đổi/trả."
-                if eligible
-                else f"Đơn đã quá thời hạn {RETURN_WINDOW_DAYS} ngày."
-            ),
-        },
-    )
-
-
-def check_inventory(sku: str, quantity: int = 1) -> str:
-    """
-    Kiểm tra tồn kho khả dụng của một SKU.
-
-    Purpose:
-        Dùng trước khi đề xuất hoặc tạo yêu cầu đổi sang sản phẩm khác.
-    Input:
-        sku: SKU cần kiểm tra.
-        quantity: Số lượng nguyên dương, mặc định là 1.
-    Output:
-        JSON string gồm tồn kho hiện tại và ``available``.
-    Error semantics:
-        Trả lỗi có cấu trúc nếu SKU không tồn tại hoặc quantity không hợp lệ.
-    Side effect:
-        Read-only.
-    """
-    normalized_sku = _normalize_text(sku).upper()
-    if not normalized_sku:
-        return _result("check_inventory", False, error="Thiếu SKU.")
-
-    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
-        return _result(
-            "check_inventory",
-            False,
-            error="quantity phải là số nguyên dương.",
-        )
-
-    if normalized_sku not in INVENTORY:
-        return _result(
-            "check_inventory",
-            False,
-            error=f"Không tìm thấy SKU '{normalized_sku}' trong kho.",
-        )
-
-    stock = INVENTORY[normalized_sku]
-    return _result(
-        "check_inventory",
-        True,
-        data={
-            "sku": normalized_sku,
-            "requested_quantity": quantity,
-            "stock": stock,
-            "available": stock >= quantity,
-        },
-    )
-
-
-def calculate_exchange_adjustment(
-    order_id: str,
-    original_sku: str,
-    replacement_sku: str,
-    quantity: int = 1,
-) -> str:
-    """
-    Tính chênh lệch tiền dự kiến khi đổi sang SKU khác.
-
-    Purpose:
-        Dùng sau khi đã xác định sản phẩm gốc và sản phẩm thay thế.
-    Input:
-        order_id, original_sku, replacement_sku và quantity.
-    Output:
-        JSON string chứa đơn giá cũ, mới và chênh lệch bằng VNĐ.
-    Error semantics:
-        Trả lỗi có cấu trúc nếu đơn, SKU hoặc quantity không hợp lệ.
-    Side effect:
-        Read-only; chỉ tính toán, không thu hoặc hoàn tiền.
-    """
-    normalized_id = _normalize_text(order_id).upper()
-    original = _normalize_text(original_sku).upper()
-    replacement = _normalize_text(replacement_sku).upper()
-
-    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
-        return _result(
-            "calculate_exchange_adjustment",
-            False,
-            error="quantity phải là số nguyên dương.",
-        )
-
-    order = ORDERS.get(normalized_id)
-    if order is None:
-        return _result(
-            "calculate_exchange_adjustment",
-            False,
-            error=f"Không tìm thấy đơn hàng '{normalized_id}'.",
-        )
-
-    item = _find_item(order, original)
-    if item is None:
-        return _result(
-            "calculate_exchange_adjustment",
-            False,
-            error=f"SKU '{original}' không thuộc đơn {normalized_id}.",
-        )
-
-    if replacement not in PRODUCT_PRICES:
-        return _result(
-            "calculate_exchange_adjustment",
-            False,
-            error=f"Không tìm thấy giá của SKU thay thế '{replacement}'.",
-        )
-
-    old_total = int(item["unit_price"]) * quantity
-    new_total = PRODUCT_PRICES[replacement] * quantity
-    difference = new_total - old_total
-
-    if difference > 0:
-        direction = "customer_pays_more"
-    elif difference < 0:
-        direction = "business_refunds"
     else:
-        direction = "no_difference"
+        options.append(
+            {
+                "option_id": "C",
+                "code": "MANUAL_REVIEW",
+                "title": "Chuyển nhân viên kiểm tra ngoại lệ",
+                "request_type": "manual_review",
+                "description": "Đơn không đạt điều kiện tự động; nhân viên chỉ tiếp nhận để rà soát ngoại lệ, không cam kết đổi hoặc hoàn tiền.",
+                "recommended": True,
+            }
+        )
 
-    return _result(
-        "calculate_exchange_adjustment",
-        True,
-        data={
-            "order_id": normalized_id,
-            "original_sku": original,
-            "replacement_sku": replacement,
-            "quantity": quantity,
-            "old_total_vnd": old_total,
-            "new_total_vnd": new_total,
-            "difference_vnd": difference,
-            "direction": direction,
-        },
+    return _ok(
+        order_id=target,
+        customer_id=order.get("customer_id"),
+        reason=reason,
+        reason_category=category,
+        eligible_for_standard_return=not blockers,
+        days_since_delivery=days,
+        blockers=blockers,
+        warnings=warnings,
+        manual_checks=manual_checks,
+        options=options,
     )
 
 
-def create_after_sales_request(
+# ---------------------------------------------------------------------------
+# OPTIONAL WRITE TOOL
+# ---------------------------------------------------------------------------
+
+def create_return_request(
     order_id: str,
+    option_code: str,
     request_type: str,
-    original_sku: str,
     reason: str,
-    replacement_sku: str = "",
-    quantity: int = 1,
-    confirmed: bool = False,
-) -> str:
-    """
-    Tạo yêu cầu đổi hoặc trả hàng trong bộ nhớ mô phỏng.
-
-    Purpose:
-        Chỉ dùng ở bước cuối sau khi đã xác minh điều kiện và người dùng xác nhận.
-    Input:
-        request_type nhận ``exchange``/``return`` hoặc ``đổi``/``trả``;
-        confirmed bắt buộc phải là ``True``.
-    Output:
-        JSON string chứa mã yêu cầu và trạng thái mới tạo.
-    Error semantics:
-        Từ chối khi thiếu xác nhận, đơn/SKU sai, không đủ điều kiện, hết kho
-        hoặc đã tồn tại yêu cầu đang xử lý.
-    Side effect:
-        Write side effect trong bộ nhớ tiến trình; không tác động hệ thống thật.
-    """
-    normalized_id = _normalize_text(order_id).upper()
-    original = _normalize_text(original_sku).upper()
-    replacement = _normalize_text(replacement_sku).upper()
-    normalized_type = _normalize_text(request_type).lower()
-    normalized_reason = _normalize_text(reason)
-
-    type_map = {
-        "exchange": "exchange",
-        "đổi": "exchange",
-        "doi": "exchange",
-        "return": "return",
-        "trả": "return",
-        "tra": "return",
-    }
-    mapped_type = type_map.get(normalized_type)
-
+    confirmed: bool,
+) -> dict[str, Any]:
+    """Create one mock request after the manager chooses and confirms an option."""
     if confirmed is not True:
-        return _result(
-            "create_after_sales_request",
-            False,
-            error="Chưa có xác nhận cuối cùng; không tạo yêu cầu.",
-        )
+        return _error("CONFIRMATION_REQUIRED", "Cần xác nhận trước khi tạo yêu cầu.")
+    target = order_id.strip().upper()
+    order = _find_order(target)
+    if order is None:
+        return _error("ORDER_NOT_FOUND", f"Không tìm thấy đơn {target}.")
+    if _active_requests(order):
+        return _error("DUPLICATE_ACTIVE_REQUEST", "Đơn đã có yêu cầu hậu mãi đang hoạt động.")
 
-    if mapped_type is None:
-        return _result(
-            "create_after_sales_request",
-            False,
-            error="request_type chỉ nhận exchange/return hoặc đổi/trả.",
-        )
-
-    eligibility_raw = check_return_eligibility(
-        normalized_id,
-        original,
-        normalized_reason,
+    available = build_return_options(target, reason)
+    if not available.get("ok"):
+        return available
+    selected = next(
+        (row for row in available.get("options", []) if row.get("code") == option_code),
+        None,
     )
-    eligibility = json.loads(eligibility_raw)
-    if not eligibility["success"]:
-        return _result(
-            "create_after_sales_request",
-            False,
-            error=eligibility["error"],
-        )
-    if not eligibility["data"]["eligible"]:
-        return _result(
-            "create_after_sales_request",
-            False,
-            error=eligibility["data"]["reason"],
-        )
+    if selected is None:
+        return _error("INVALID_OPTION", f"Phương án {option_code} không còn hợp lệ cho đơn {target}.")
+    if selected.get("request_type") != request_type:
+        return _error("OPTION_TYPE_MISMATCH", "Loại yêu cầu không khớp phương án đã chọn.")
 
-    if mapped_type == "exchange":
-        if not replacement:
-            return _result(
-                "create_after_sales_request",
-                False,
-                error="Yêu cầu đổi hàng cần replacement_sku.",
-            )
-        inventory = json.loads(check_inventory(replacement, quantity))
-        if not inventory["success"]:
-            return _result(
-                "create_after_sales_request",
-                False,
-                error=inventory["error"],
-            )
-        if not inventory["data"]["available"]:
-            return _result(
-                "create_after_sales_request",
-                False,
-                error=f"SKU '{replacement}' không đủ tồn kho.",
-            )
+    data = _requests_data()
+    requests = data.setdefault("requests", [])
+    known_ids: list[int] = []
+    for request in requests:
+        digits = "".join(char for char in str(request.get("request_id", "")) if char.isdigit())
+        if digits:
+            known_ids.append(int(digits))
+    for known_order in _orders():
+        embedded = known_order.get("after_sales_request")
+        if isinstance(embedded, dict):
+            digits = "".join(char for char in str(embedded.get("request_id", "")) if char.isdigit())
+            if digits:
+                known_ids.append(int(digits))
+    request_id = f"ASR{(max(known_ids, default=0) + 1):04d}"
 
-    request_id = f"AS{len(AFTER_SALES_REQUESTS) + 1:04d}"
-    request = {
+    record = {
         "request_id": request_id,
-        "order_id": normalized_id,
-        "request_type": mapped_type,
-        "original_sku": original,
-        "replacement_sku": replacement or None,
-        "quantity": quantity,
-        "reason": normalized_reason,
-        "status": "created",
-        "confirmed": True,
+        "order_id": target,
+        "customer_id": order.get("customer_id"),
+        "option_code": option_code,
+        "type": request_type,
+        "reason": reason,
+        "status": "pending_review",
+        "status_label": "Đang chờ duyệt",
+        "requested_at": datetime.now().isoformat(timespec="seconds"),
+        "source": "ai_agent_mock",
     }
-    AFTER_SALES_REQUESTS[request_id] = request
-    return _result("create_after_sales_request", True, data=request)
+    requests.append(record)
+    _atomic_write_json(REQUESTS_PATH, data)
+    return _ok(
+        message="Đã tạo yêu cầu mô phỏng.",
+        request=record,
+        note="Yêu cầu mới ở trạng thái chờ duyệt; chưa hoàn tiền hoặc giữ hàng.",
+    )
 
 
-def get_after_sales_status(request_id: str) -> str:
-    """
-    Tra cứu trạng thái một yêu cầu đổi/trả đã tạo.
+def build_tool_registry(
+    knowledge_base: ChromaKnowledgeBase | None = None,
+) -> ToolRegistry:
+    kb = knowledge_base or get_knowledge_base()
 
-    Purpose:
-        Dùng khi người quản lý cần theo dõi tiến độ hậu mãi.
-    Input:
-        request_id: Mã yêu cầu, ví dụ ``AS0001``.
-    Output:
-        JSON string chứa dữ liệu yêu cầu.
-    Error semantics:
-        Trả ``success=false`` nếu thiếu hoặc không tìm thấy mã.
-    Side effect:
-        Read-only.
-    """
-    normalized_id = _normalize_text(request_id).upper()
-    if not normalized_id:
-        return _result(
-            "get_after_sales_status",
-            False,
-            error="Thiếu mã yêu cầu hậu mãi.",
-        )
+    def search_policy_bound(query: str, top_k: int = 5) -> dict[str, Any]:
+        return search_policy(query, top_k, knowledge_base=kb)
 
-    request = AFTER_SALES_REQUESTS.get(normalized_id)
-    if request is None:
-        return _result(
-            "get_after_sales_status",
-            False,
-            error=f"Không tìm thấy yêu cầu '{normalized_id}'.",
-        )
-
-    return _result("get_after_sales_status", True, data=request)
+    return ToolRegistry(
+        [
+            ToolSpec(
+                name="lookup_order",
+                description=(
+                    "Tra cứu chính xác một đơn theo mã DH. Trả mã đơn, mã khách hàng, "
+                    "trạng thái, ngày đặt/giao, sản phẩm, tổng tiền và yêu cầu hậu mãi hiện có."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"order_id": {"type": "string"}},
+                    "required": ["order_id"],
+                    "additionalProperties": False,
+                },
+                handler=lookup_order,
+            ),
+            ToolSpec(
+                name="search_policy",
+                description=(
+                    "Tìm bất kỳ nội dung FAQ/chính sách đổi trả liên quan trong Chroma. "
+                    "Tool chỉ trả các tài liệu có source=policy."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "top_k": {"type": "integer", "minimum": 1, "maximum": 8},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                handler=search_policy_bound,
+            ),
+            ToolSpec(
+                name="build_return_options",
+                description=(
+                    "Đánh giá một đơn và tạo các phương án trả/đổi/chuyển kiểm tra để "
+                    "người quản lý lựa chọn. Đây là tool lập phương án nghiệp vụ, không phải Planner của Agent."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "order_id": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["order_id", "reason"],
+                    "additionalProperties": False,
+                },
+                handler=build_return_options,
+            ),
+            ToolSpec(
+                name="create_return_request",
+                description=(
+                    "Tạo yêu cầu mô phỏng sau khi quản lý đã chọn phương án và xác nhận ở lượt riêng."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "order_id": {"type": "string"},
+                        "option_code": {"type": "string"},
+                        "request_type": {
+                            "type": "string",
+                            "enum": ["return", "exchange", "manual_review"],
+                        },
+                        "reason": {"type": "string"},
+                        "confirmed": {"type": "boolean"},
+                    },
+                    "required": [
+                        "order_id",
+                        "option_code",
+                        "request_type",
+                        "reason",
+                        "confirmed",
+                    ],
+                    "additionalProperties": False,
+                },
+                handler=create_return_request,
+                side_effect="write_mock_data",
+                requires_confirmation=True,
+            ),
+        ]
+    )
 
 
 AVAILABLE_TOOLS = {
     "lookup_order": lookup_order,
-    "check_return_eligibility": check_return_eligibility,
-    "check_inventory": check_inventory,
-    "calculate_exchange_adjustment": calculate_exchange_adjustment,
-    "create_after_sales_request": create_after_sales_request,
-    "get_after_sales_status": get_after_sales_status,
+    "search_policy": search_policy,
+    "build_return_options": build_return_options,
+    "create_return_request": create_return_request,
 }
-
-
-if __name__ == "__main__":
-    print("=== SMOKE TEST TOOL REGISTRY ===")
-    print(lookup_order("DH1024"))
-    print(check_inventory("AO-DEN-M", 1))

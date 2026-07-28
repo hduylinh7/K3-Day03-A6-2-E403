@@ -239,8 +239,10 @@ def _order_documents(orders: list[dict[str, Any]]) -> list[KnowledgeDocument]:
             else "Chưa có yêu cầu đổi trả."
         )
         text = (
-            f"Mã đơn: {order_id}. Trạng thái: {order.get('status_label')} "
-            f"({order.get('status')}). Ngày đặt: {order.get('ordered_at')}. "
+            f"Mã đơn: {order_id}. Mã khách: {order.get('customer_id') or 'chưa có'}. "
+            f"Khách: {order.get('customer_display') or 'không rõ'}. "
+            f"Trạng thái: {order.get('status_label')} ({order.get('status')}). "
+            f"Ngày đặt: {order.get('ordered_at')}. "
             f"Ngày giao: {order.get('delivered_at') or 'chưa giao'}. "
             f"Thanh toán: {order.get('payment_method')}.\n"
             f"Sản phẩm trong đơn:\n" + "\n".join(item_lines) + "\n"

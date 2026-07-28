@@ -1,0 +1,40 @@
+flowchart TD
+    A[Người dùng gửi yêu cầu] --> B{Loại yêu cầu?}
+
+    B -->|Baseline để so sánh| C[LLM Baseline]
+    C --> C1[1 LLM call]
+    C1 --> C2[Không RAG, không tool]
+    C2 --> Z[Kết thúc]
+
+    B -->|FAQ / policy| D[FAQ RAG path]
+    D --> E[search_policy]
+    E --> F[LLM diễn đạt từ policy]
+    F --> Z
+
+    B -->|Tra cứu đơn| G[Agent path]
+    G --> H[Domain Planner tạo micro-plan]
+    H --> I[lookup_order]
+    I --> J{Tìm thấy đơn?}
+    J -->|Không| K[Thông báo ORDER_NOT_FOUND]
+    K --> Z
+    J -->|Có| L[Trả thông tin đơn]
+    L --> Z
+
+    B -->|Lập phương án trả hàng| M[Agent path]
+    M --> N[Planner tạo plan nhiều bước]
+    N --> O[lookup_order]
+    O --> P{Đơn hợp lệ?}
+    P -->|Không| Q[Dừng an toàn]
+    Q --> Z
+    P -->|Có| R[search_policy]
+    R --> S[build_return_options]
+    S --> T[Trình phương án A / B / C]
+    T --> U{Quản lý chọn?}
+    U -->|Chưa chọn| Z
+    U -->|Đã chọn| V[Xin xác nhận]
+    V --> W{Xác nhận?}
+    W -->|Không| X[Hủy, không thay đổi dữ liệu]
+    X --> Z
+    W -->|Có| Y[create_return_request]
+    Y --> Y1[Trả mã ASR và trạng thái chờ duyệt]
+    Y1 --> Z
