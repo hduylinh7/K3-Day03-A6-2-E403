@@ -1,5 +1,4 @@
-google-genai
-openai
-anthropic
-python-dotenv
-requests
+chromadb>=1.0.0,<2.0.0
+google-genai>=1.0.0
+python-dotenv>=1.0.0
+streamlit>=1.40.0,<2.0.0

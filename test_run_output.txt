@@ -1,0 +1,1 @@
+LỖI KHỞI ĐỘNG: Chưa cài ChromaDB. Chạy: python -m pip install -U chromadb

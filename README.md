@@ -115,3 +115,39 @@ docs/hybrid_flowchart.mermaid
 docs/trace_eval.md
 config/test_cases_agent.json
 ```
+
+## Giao diện web Streamlit
+
+Cài dependencies:
+
+```cmd
+python -m pip install -r requirements.txt
+```
+
+Khởi chạy giao diện:
+
+```cmd
+python -m streamlit run streamlit_app.py
+```
+
+Trên Windows có thể nhấp đúp:
+
+```text
+run_ui.bat
+```
+
+Sau khi chạy, Streamlit sẽ mở trình duyệt tại địa chỉ thường là:
+
+```text
+http://localhost:8501
+```
+
+Giao diện hỗ trợ:
+
+- Chat nhiều lượt với cùng một Agent session.
+- Hiển thị hoặc ẩn execution plan.
+- Hiển thị Action / Observation trace.
+- Nút chọn trực tiếp phương án A/B/C.
+- Nút xác nhận hoặc hủy trước tool ghi dữ liệu.
+- Chuyển giữa Gemini/Mock và Gemini/Hash embedding.
+- Xóa hội thoại và xây lại Chroma index.

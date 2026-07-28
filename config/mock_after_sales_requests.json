@@ -1,4 +1,17 @@
 {
   "data_version": "2026-07-28",
-  "requests": []
+  "requests": [
+    {
+      "request_id": "ASR0009",
+      "order_id": "DH1024",
+      "customer_id": "KH0001",
+      "option_code": "RETURN_REVIEW",
+      "type": "return",
+      "reason": "chưa cung cấp lý do cụ thể",
+      "status": "pending_review",
+      "status_label": "Đang chờ duyệt",
+      "requested_at": "2026-07-28T15:27:17",
+      "source": "ai_agent_mock"
+    }
+  ]
 }
