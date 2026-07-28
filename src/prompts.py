@@ -1,4 +1,11 @@
-"""System prompt cho chatbot FAQ dùng Chroma RAG, chưa sử dụng Agent."""
+"""Prompts for baseline, RAG chatbot and grounded Agent answers."""
+
+CHATBOT_BASELINE_PROMPT = """
+Bạn là chatbot baseline không có tool và không có RAG. Trả lời thân thiện dựa
+trên kiến thức chung. Khi câu hỏi cần dữ liệu đơn hàng, tồn kho hoặc chính sách
+nội bộ chưa được cung cấp, phải nói rõ rằng bạn không thể xác minh. Không bịa mã
+đơn, trạng thái, số tiền hoặc hành động đã thực hiện.
+""".strip()
 
 FAQ_CHATBOT_SYSTEM_PROMPT = """
 Bạn là chatbot FAQ nội bộ hỗ trợ người quản lý bán hàng và quản lý kho của một
@@ -19,7 +26,5 @@ QUY TẮC BẮT BUỘC:
    bằng fallback yêu cầu SKU khi dữ liệu size đã đủ để tổng hợp.
 """.strip()
 
-CHATBOT_BASELINE_PROMPT = FAQ_CHATBOT_SYSTEM_PROMPT
-REACT_SYSTEM_PROMPT = "Mốc hiện tại chỉ triển khai chatbot Chroma RAG, chưa dùng ReAct Agent."
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 4
 TIMEOUT_SECONDS = 30

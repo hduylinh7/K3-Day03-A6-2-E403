@@ -1,0 +1,12 @@
+{
+  "data_version": "2026-07-28",
+  "return_window_days": 7,
+  "excluded_sale_types": ["FINAL_SALE"],
+  "manual_checks": [
+    "Sản phẩm còn nguyên tem, nhãn và bao bì.",
+    "Sản phẩm chưa qua sử dụng, giặt, sửa chữa hoặc hư hỏng do khách.",
+    "Số lượng thực nhận khớp với yêu cầu."
+  ],
+  "personal_change_warning": "Lý do đổi ý cá nhân có thể bị từ chối theo policy.",
+  "missing_reason_warning": "Chưa có lý do trả hàng rõ ràng; cần bổ sung trước khi tạo yêu cầu."
+}
