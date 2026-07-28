@@ -1,101 +1,169 @@
-"""
-🚀 CORE AGENT APP (Dành cho Role 4: Core Agent Developer)
-File chính ghép nối tất cả các thành phần: Tools + Prompts + Test Cases + Multi-Provider.
-"""
+"""Ứng dụng chatbot FAQ Chroma RAG, chưa sử dụng Agent."""
 
+from __future__ import annotations
+
+import argparse
 import json
-import os
 import sys
+from pathlib import Path
+from typing import Any
+
 from dotenv import load_dotenv
 
-# Đảm bảo import các module cùng thư mục src/ hoạt động mượt mà
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
-# Đảm bảo in ra Tiếng Việt và Emojis không bị lỗi trên Windows Console
-if sys.stdout.encoding != 'utf-8':
+if sys.stdout.encoding != "utf-8":
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
-# Import các thành phần từ file của Role 2, Role 3 & Multi-Provider Adapter
-from tools import AVAILABLE_TOOLS, get_weather, search_flights
-from prompts import CHATBOT_BASELINE_PROMPT, REACT_SYSTEM_PROMPT, MAX_ITERATIONS
-from providers import get_llm_provider
+from ai_levels.level2_llm_chatbot import build_rag_context, llm_chatbot
+from knowledge_base import KnowledgeBaseError, get_knowledge_base
+from providers import BaseLLMProvider, get_llm_provider
 
 load_dotenv()
 
-def load_test_cases():
-    """Đọc bộ test cases từ config/test_cases.json của Role 1"""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    config_path = os.path.join(base_dir, "config", "test_cases.json")
-    
-    # Fallback kiểm tra nếu file ở thư mục hiện tại
-    if not os.path.exists(config_path):
-        config_path = "test_cases.json"
-        
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+
+def load_test_cases() -> list[dict[str, Any]]:
+    path = PROJECT_ROOT / "config" / "test_cases.json"
+    with path.open("r", encoding="utf-8") as file:
+        cases = json.load(file)
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("config/test_cases.json phải là danh sách không rỗng.")
+    return cases
 
 
-def run_baseline_chatbot(user_query: str, provider):
-    """
-    Dựng Chatbot gốc (Baseline) không có công cụ.
-    """
-    print(f"\n💬 [CHATBOT BASELINE] Câu hỏi: {user_query}")
-    print(f"⚙️ System Prompt: {CHATBOT_BASELINE_PROMPT.strip()}")
-    
-    # Gọi LLM Provider thực hiện sinh câu trả lời
-    response = provider.generate(user_query, system_prompt=CHATBOT_BASELINE_PROMPT)
-    print(f"🤖 Chatbot trả lời:\n{response}")
+def run_test_suite(provider: BaseLLMProvider, knowledge_base: Any) -> None:
+    cases = load_test_cases()
+    print(f"\nĐã tải {len(cases)} test case. Provider: {provider.model_name}")
+    print("Kiến trúc: Chroma retrieval + exact lookup + 1 LLM call + 0 agent loop")
+
+    for case in cases:
+        answer = llm_chatbot(
+            case["question"], provider, history=[], knowledge_base=knowledge_base
+        )
+        print("\n" + "=" * 72)
+        print(f"CASE #{case['id']} | {case['category']}")
+        print(f"Question : {case['question']}")
+        print(f"Expected : {case['expected_behavior']}")
+        print(f"Answer   : {answer}")
 
 
-def run_react_agent(user_query: str, provider):
-    """
-    Dựng vòng lặp ReAct Agent (Thought -> Action -> Observation) có Guardrails.
-    """
-    print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query}")
-    step = 0
-    
-    while step < MAX_ITERATIONS:
-        step += 1
-        print(f"\n--- 🔄 Vòng lặp ReAct (Step {step}/{MAX_ITERATIONS}) ---")
-        
-        if step == 1:
-            print("🧠 Thought: Câu hỏi này cần tra cứu thời tiết thời gian thực.")
-            print("🛠️ Action: get_weather['Hà Nội']")
-            
-            # Thực thi tool
-            obs = get_weather("Hà Nội")
-            print(f"👁️ Observation: {obs}")
-            
-        elif step == 2:
-            print("🧠 Thought: Tôi đã có thông tin thời tiết Hà Nội, giờ tôi có thể tư vấn trang phục.")
-            print("🏁 Final Answer: Thời tiết Hà Nội hôm nay 28°C, nắng nhẹ. Bạn nên mặc áo phông thoáng mát!")
+def run_interactive_chat(
+    provider: BaseLLMProvider,
+    knowledge_base: Any,
+    show_context: bool = False,
+) -> None:
+    history: list[dict[str, str]] = []
+    context_debug = show_context
+
+    print("\n" + "=" * 72)
+    print("CHATBOT FAQ CHROMA RAG - ĐƠN HÀNG, TỒN KHO VÀ ĐỔI TRẢ")
+    print("=" * 72)
+    print("Chatbot chỉ tra cứu và giải thích, không tạo hoặc sửa dữ liệu.")
+    print("Lệnh: /help | /test | /clear | /context on | /context off | exit")
+
+    while True:
+        try:
+            question = input("\nBạn: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nĐã thoát chatbot.")
             break
-            
-    if step >= MAX_ITERATIONS:
-        print(f"🛡️ GUARDRAIL TRIGGERED: Đã đạt giới hạn tối đa {MAX_ITERATIONS} bước. Ngắt lặp an toàn!")
+
+        command = question.casefold()
+        if command in {"exit", "quit", "thoát", "0", "/exit"}:
+            print("Bot: Đã kết thúc phiên trò chuyện.")
+            break
+        if not question:
+            print("Bot: Bạn hãy nhập câu hỏi.")
+            continue
+        if command == "/help":
+            print(
+                "Bot: Ví dụ: 'trả hàng như nào?', 'tôi mặc không vừa thì làm sao?', "
+                "'size M còn bao nhiêu?', 'đơn DH1024 đổi size M được không?'"
+            )
+            continue
+        if command == "/clear":
+            history.clear()
+            print("Bot: Đã xóa lịch sử hội thoại tạm thời.")
+            continue
+        if command == "/test":
+            run_test_suite(provider, knowledge_base)
+            continue
+        if command == "/context on":
+            context_debug = True
+            print("Bot: Đã bật hiển thị context Chroma.")
+            continue
+        if command == "/context off":
+            context_debug = False
+            print("Bot: Đã tắt hiển thị context Chroma.")
+            continue
+
+        if context_debug:
+            print("\n--- CHROMA CONTEXT DEBUG ---")
+            print(build_rag_context(question, history, knowledge_base))
+            print("--- END CONTEXT ---\n")
+
+        answer = llm_chatbot(question, provider, history, knowledge_base)
+        print(f"Bot: {answer}")
+        history.extend(
+            [
+                {"role": "user", "content": question},
+                {"role": "assistant", "content": answer},
+            ]
+        )
+        history[:] = history[-8:]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Chatbot FAQ dùng Chroma RAG.")
+    parser.add_argument("--test", action="store_true", help="Chạy bộ test case.")
+    parser.add_argument(
+        "--provider", choices=["gemini", "mock"], help="Ghi đè LLM_PROVIDER."
+    )
+    parser.add_argument(
+        "--embedding-provider",
+        choices=["gemini", "hash"],
+        help="Gemini cho semantic retrieval; hash chỉ để test offline.",
+    )
+    parser.add_argument(
+        "--show-context", action="store_true", help="Hiển thị context Chroma."
+    )
+    parser.add_argument(
+        "--rebuild-index", action="store_true", help="Xóa và tạo lại index Chroma."
+    )
+    parser.add_argument(
+        "--index-only", action="store_true", help="Lập index xong rồi thoát."
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    try:
+        provider = get_llm_provider(args.provider)
+        knowledge_base = get_knowledge_base(args.embedding_provider)
+        index_info = knowledge_base.ensure_index(force=args.rebuild_index)
+    except (KnowledgeBaseError, ValueError) as exc:
+        print(f"LỖI KHỞI ĐỘNG: {exc}")
+        raise SystemExit(1) from exc
+
+    print(f"LLM Provider: {provider.__class__.__name__} | Model: {provider.model_name}")
+    print(
+        "Chroma: {document_count} chunks | embedding={embedding_backend} | "
+        "rebuilt={rebuilt} | path={db_path}".format(**index_info)
+    )
+    if args.index_only:
+        return
+    if args.test:
+        run_test_suite(provider, knowledge_base)
+    else:
+        run_interactive_chat(provider, knowledge_base, args.show_context)
 
 
 if __name__ == "__main__":
-    print("==================================================")
-    print("🏫 ĐẠI HỌC VINUNI - BÀI LAB 3: CHATBOT VS REACT AGENT")
-    print("==================================================")
-    
-    # Khởi tạo Multi-Provider LLM Adapter (Đọc từ biến môi trường LLM_PROVIDER)
-    provider = get_llm_provider()
-    model_name = getattr(provider, "model_name", "Offline Mock Mode")
-    print(f"🔌 LLM Provider đang hoạt động: {provider.__class__.__name__} (Model: {model_name})")
-    
-    tests = load_test_cases()
-    print(f"✅ Đã tải thành công {len(tests)} Test Cases từ config/test_cases.json\n")
-    
-    # Chạy thử câu test số 3
-    sample_query = tests[2]["question"]
-    
-    print("--- DEMO 1: CHẠY TRÊN CHATBOT BASELINE ---")
-    run_baseline_chatbot(sample_query, provider)
-    
-    print("\n--- DEMO 2: CHẠY TRÊN REACT AGENT ---")
-    run_react_agent(sample_query, provider)
+    main()
