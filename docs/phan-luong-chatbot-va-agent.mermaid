@@ -1,34 +1,34 @@
 flowchart TD
-    A[Người dùng gửi yêu cầu] --> B{Loại yêu cầu?}
+    A[Người dùng gửi yêu cầu] --> B{Mục tiêu của yêu cầu?}
 
-    B -->|Baseline để so sánh| C[LLM Baseline]
+    B -->|So sánh Baseline| C[Baseline Chatbot]
     C --> C1[1 LLM call]
     C1 --> C2[Không RAG, không tool]
     C2 --> Z[Kết thúc]
 
-    B -->|FAQ / policy| D[FAQ RAG path]
-    D --> E[search_policy]
-    E --> F[LLM diễn đạt từ policy]
+    B -->|FAQ hoặc policy| D[FAQ/RAG path]
+    D --> E[Retrieve policy bằng Chroma]
+    E --> F[LLM trả lời grounded, read-only]
     F --> Z
 
-    B -->|Tra cứu đơn| G[Agent path]
-    G --> H[Domain Planner tạo micro-plan]
+    B -->|Tra cứu một mã đơn| G[Agent path]
+    G --> H[Planner tạo micro-plan]
     H --> I[lookup_order]
     I --> J{Tìm thấy đơn?}
-    J -->|Không| K[Thông báo ORDER_NOT_FOUND]
+    J -->|Không| K[ORDER_NOT_FOUND và dừng]
     K --> Z
-    J -->|Có| L[Trả thông tin đơn]
+    J -->|Có| L[Trả chi tiết đơn]
     L --> Z
 
     B -->|Lập phương án trả hàng| M[Agent path]
-    M --> N[Planner tạo plan nhiều bước]
+    M --> N[Planner tạo plan 4 bước]
     N --> O[lookup_order]
-    O --> P{Đơn hợp lệ?}
+    O --> P{Observation ok?}
     P -->|Không| Q[Dừng an toàn]
     Q --> Z
     P -->|Có| R[search_policy]
     R --> S[build_return_options]
-    S --> T[Trình phương án A / B / C]
+    S --> T[Trình A/B/C]
     T --> U{Quản lý chọn?}
     U -->|Chưa chọn| Z
     U -->|Đã chọn| V[Xin xác nhận]
@@ -36,5 +36,5 @@ flowchart TD
     W -->|Không| X[Hủy, không thay đổi dữ liệu]
     X --> Z
     W -->|Có| Y[create_return_request]
-    Y --> Y1[Trả mã ASR và trạng thái chờ duyệt]
+    Y --> Y1[Trả mã ASR, pending_review]
     Y1 --> Z

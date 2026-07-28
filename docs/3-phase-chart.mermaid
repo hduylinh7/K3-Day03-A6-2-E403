@@ -1,0 +1,22 @@
+flowchart LR
+    U[User query] --> P1[Phase 1: Baseline Chatbot]
+    P1 --> B1[1 LLM call]
+    B1 --> B2[Không RAG, không Tool]
+
+    U --> P2[Phase 2: FAQ RAG Chatbot]
+    P2 --> R1[Chroma retrieval]
+    R1 --> R2[Policy context]
+    R2 --> R3[LLM trả lời read-only]
+
+    U --> P3[Phase 3: AI Agent]
+    P3 --> PL[Domain Planner]
+    PL --> T1[lookup_order]
+    PL --> T2[search_policy]
+    PL --> T3[build_return_options]
+    T1 --> O[Observations]
+    T2 --> O
+    T3 --> O
+    O --> D[Trình phương án A/B/C]
+    D --> C{Quản lý xác nhận?}
+    C -->|Không| X[Không thay đổi dữ liệu]
+    C -->|Có| W[create_return_request]

@@ -1,0 +1,26 @@
+stateDiagram-v2
+    [*] --> ReceiveInput
+    ReceiveInput --> BuildPlan
+    BuildPlan --> NeedsInput: thiếu order_id/intent
+    NeedsInput --> [*]
+
+    BuildPlan --> ExecuteStep: plan hợp lệ
+    ExecuteStep --> AppendObservation: tool trả kết quả
+    AppendObservation --> ToolError: Observation ok=false
+    ToolError --> [*]
+
+    AppendObservation --> ExecuteStep: còn tool trong plan
+    AppendObservation --> FinalPolicy: policy_question hoàn tất
+    AppendObservation --> FinalOrder: order_lookup hoàn tất
+    AppendObservation --> AwaitSelection: return_options hoàn tất
+
+    AwaitSelection --> AwaitConfirmation: quản lý chọn A/B/C
+    AwaitSelection --> Cancelled: hủy
+    AwaitConfirmation --> CreateRequest: xác nhận
+    AwaitConfirmation --> Cancelled: hủy
+    CreateRequest --> Completed
+
+    FinalPolicy --> [*]
+    FinalOrder --> [*]
+    Cancelled --> [*]
+    Completed --> [*]
